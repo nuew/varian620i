@@ -1,0 +1,13 @@
+[package]
+name = "varian620i"
+version = "0.1.0"
+authors = ["Emma Welker <code@nuew.net"]
+edition = "2024"
+rust-version = "1.85.1"
+description = "Emulator for the Varian Data Machines 620/i"
+repository = "https://github.com/nuew/varian620i"
+license = "GPL-3.0-or-later"
+categories = ["emulators"]
+
+[dependencies]
+bitflags = "2.9.0"
