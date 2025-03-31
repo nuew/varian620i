@@ -61,19 +61,15 @@ impl BasicOperation {
 }
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy, Hash)]
-pub enum IndexRegister {
-    X,
-    B,
-}
-
-#[derive(Debug, PartialEq, Eq, Clone, Copy, Hash)]
 pub enum Operand {
     /// Direct
     Direct(u16),
     /// Relative to P register
     Relative(u16),
-    /// Index with _ register
-    Index(IndexRegister, u16),
+    /// Index with X register
+    IndexX(u16),
+    /// Index with B register
+    IndexB(u16),
     /// Multilevel indirect
     Indirect(u16),
     /// Immediate
@@ -92,8 +88,8 @@ impl Operand {
         match m {
             0b000..=0b011 => Self::Direct(((u16::from(m) & 0b11) << 9) | a),
             0b100 => Self::Relative(a),
-            0b101 => Self::Index(IndexRegister::X, a),
-            0b110 => Self::Index(IndexRegister::B, a),
+            0b101 => Self::IndexX(a),
+            0b110 => Self::IndexB(a),
             0b111 => Self::Indirect(a),
             _ => panic!("m must not have any bits above position 3 set"),
         }
@@ -103,8 +99,8 @@ impl Operand {
         match a & 0b111 {
             0b000..=0b011 => Self::Immediate(next),
             0b100 => Self::Relative(next),
-            0b101 => Self::Index(IndexRegister::X, next),
-            0b110 => Self::Index(IndexRegister::B, next),
+            0b101 => Self::IndexX(next),
+            0b110 => Self::IndexB(next),
             0b111 if next & 0x8000 == 0 => Self::Direct(next),
             0b111 if next & 0x8000 != 0 => Self::Indirect(next & 0x7FFF),
             _ => panic!("m must not have any bits above position 3 set"),
@@ -408,7 +404,7 @@ mod tests {
             Instruction::decode(0o035010, || panic!()),
             Some(Instruction::BasicOperation {
                 operation: BasicOperation::Ldx,
-                operand: Operand::Index(IndexRegister::X, 0o10)
+                operand: Operand::IndexX(0o10)
             })
         );
     }
@@ -419,7 +415,7 @@ mod tests {
             Instruction::decode(0o056020, || panic!()),
             Some(Instruction::BasicOperation {
                 operation: BasicOperation::Sta,
-                operand: Operand::Index(IndexRegister::B, 0o20)
+                operand: Operand::IndexB(0o20)
             })
         );
     }
@@ -474,7 +470,7 @@ mod tests {
             Instruction::decode(0o006145, || 0o000000),
             Some(Instruction::BasicOperation {
                 operation: BasicOperation::Sub,
-                operand: Operand::Index(IndexRegister::X, 0o000000)
+                operand: Operand::IndexX(0o000000)
             })
         );
     }
@@ -485,7 +481,7 @@ mod tests {
             Instruction::decode(0o006166, || 0o177777),
             Some(Instruction::BasicOperation {
                 operation: BasicOperation::Mul,
-                operand: Operand::Index(IndexRegister::B, 0o177777)
+                operand: Operand::IndexB(0o177777)
             })
         );
     }
