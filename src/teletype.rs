@@ -1,3 +1,4 @@
+#[allow(clippy::match_same_arms, dead_code)]
 fn to_unicode(ch: u8) -> char {
     match ch {
         ..0o200 => '\u{FFFD}',
