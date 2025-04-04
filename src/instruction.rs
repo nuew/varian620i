@@ -1,6 +1,22 @@
+use std::{error::Error, fmt::Display};
+
 use bitflags::bitflags;
 
-use crate::VarianError;
+#[derive(Debug, PartialEq, Eq, Clone, Copy, Hash)]
+pub struct InstructionDecodeError;
+
+impl Display for InstructionDecodeError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        #[allow(deprecated)]
+        f.write_str(Self::description(self))
+    }
+}
+
+impl Error for InstructionDecodeError {
+    fn description(&self) -> &str {
+        "instruction decode error"
+    }
+}
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy, Hash)]
 pub enum BasicOperation {
@@ -259,9 +275,10 @@ pub enum IoOperation {
 }
 
 impl IoOperation {
-    fn parse<T>(m: u8, a: u16, next: T) -> Result<Self, VarianError>
+    fn parse<T, E>(m: u8, a: u16, next: T) -> Result<Self, E>
     where
-        T: FnOnce() -> Result<u16, VarianError>,
+        T: FnOnce() -> Result<u16, E>,
+        E: From<InstructionDecodeError>,
     {
         let x = u8::try_from((a >> 6) & 0o7).unwrap();
         match (m, x) {
@@ -281,9 +298,7 @@ impl IoOperation {
             (0o3, 0o1) => Ok(Self::Oar),
             (0o3, 0o2) => Ok(Self::Obr),
             (0o3, 0o3) => Ok(Self::Oab),
-            (0o2, 0o4) | (0o3, 0o4..=0o7) | (0o4..=0o7, _) => {
-                Err(VarianError::InstructionDecodeError)
-            }
+            (0o2, 0o4) | (0o3, 0o4..=0o7) | (0o4..=0o7, _) => Err(InstructionDecodeError.into()),
             (_, 0o10..) => unreachable!(),
             (0o10.., _) => panic!("m must not have any bits above position 3 set"),
         }
@@ -328,9 +343,10 @@ pub enum Instruction {
 }
 
 impl Instruction {
-    pub fn decode<T>(insn: u16, next: T) -> Result<Self, VarianError>
+    pub fn decode<T, E>(insn: u16, next: T) -> Result<Self, E>
     where
-        T: FnOnce() -> Result<u16, VarianError>,
+        T: FnOnce() -> Result<u16, E>,
+        E: From<InstructionDecodeError>,
     {
         let opcode = u8::try_from(insn >> 12).unwrap();
         let m = u8::try_from((insn >> 9) & 0o7).unwrap();
@@ -353,7 +369,7 @@ impl Instruction {
                 address: next()?,
             }),
             (0o00, 0o4) => Ok(Self::Shift {
-                registers: ShiftRegisters::from_a(a).ok_or(VarianError::InstructionDecodeError)?,
+                registers: ShiftRegisters::from_a(a).ok_or(InstructionDecodeError.into())?,
                 mode: ShiftMode::from_a(a),
                 count: u8::try_from(a & 0b11111).unwrap(),
             }),
@@ -364,12 +380,12 @@ impl Instruction {
                 dest: RegisterChangeRegister::from_dest(a),
             }),
             (0o00, 0o6) => Ok(Self::BasicOperation {
-                operation: BasicOperation::from_a(a).ok_or(VarianError::InstructionDecodeError)?,
+                operation: BasicOperation::from_a(a).ok_or(InstructionDecodeError.into())?,
                 operand: Operand::from_x(a, next()?),
             }),
             (0o00, 0o7) if a == 0o400 => Ok(Self::Overflow(OverflowMode::Reset)),
             (0o00, 0o7) if a == 0o401 => Ok(Self::Overflow(OverflowMode::Set)),
-            (0o00, 0o7) => Err(VarianError::InstructionDecodeError),
+            (0o00, 0o7) => Err(InstructionDecodeError.into()),
             (0o01..=0o07 | 0o11..=0o17, _) => Ok(Self::BasicOperation {
                 operation: BasicOperation::from_opcode(opcode).unwrap(),
                 operand: Operand::from_ma(m, a),
@@ -391,7 +407,7 @@ mod tests {
     fn lda_direct() {
         assert_eq!(
             Instruction::decode(0o010001, || panic!()),
-            Ok(Instruction::BasicOperation {
+            Ok::<_, InstructionDecodeError>(Instruction::BasicOperation {
                 operation: BasicOperation::Lda,
                 operand: Operand::Direct(0o0001)
             })
@@ -402,7 +418,7 @@ mod tests {
     fn ldb_relative() {
         assert_eq!(
             Instruction::decode(0o024002, || panic!()),
-            Ok(Instruction::BasicOperation {
+            Ok::<_, InstructionDecodeError>(Instruction::BasicOperation {
                 operation: BasicOperation::Ldb,
                 operand: Operand::Relative(2)
             })
@@ -413,7 +429,7 @@ mod tests {
     fn ldx_index_x() {
         assert_eq!(
             Instruction::decode(0o035010, || panic!()),
-            Ok(Instruction::BasicOperation {
+            Ok::<_, InstructionDecodeError>(Instruction::BasicOperation {
                 operation: BasicOperation::Ldx,
                 operand: Operand::IndexX(0o10)
             })
@@ -424,7 +440,7 @@ mod tests {
     fn sta_index_b() {
         assert_eq!(
             Instruction::decode(0o056020, || panic!()),
-            Ok(Instruction::BasicOperation {
+            Ok::<_, InstructionDecodeError>(Instruction::BasicOperation {
                 operation: BasicOperation::Sta,
                 operand: Operand::IndexB(0o20)
             })
@@ -435,7 +451,7 @@ mod tests {
     fn stb_indirect() {
         assert_eq!(
             Instruction::decode(0o067030, || panic!()),
-            Ok(Instruction::BasicOperation {
+            Ok::<_, InstructionDecodeError>(Instruction::BasicOperation {
                 operation: BasicOperation::Stb,
                 operand: Operand::Indirect(0o30)
             })
@@ -446,7 +462,7 @@ mod tests {
     fn stx_direct_hi() {
         assert_eq!(
             Instruction::decode(0o072001, || panic!()),
-            Ok(Instruction::BasicOperation {
+            Ok::<_, InstructionDecodeError>(Instruction::BasicOperation {
                 operation: BasicOperation::Stx,
                 operand: Operand::Direct(0o2001)
             })
@@ -456,8 +472,8 @@ mod tests {
     #[test]
     fn inr_immediate() {
         assert_eq!(
-            Instruction::decode(0o006040, || Ok(0o123456)),
-            Ok(Instruction::BasicOperation {
+            Instruction::decode(0o006040, || Ok::<_, InstructionDecodeError>(0o123456)),
+            Ok::<_, InstructionDecodeError>(Instruction::BasicOperation {
                 operation: BasicOperation::Inr,
                 operand: Operand::Immediate(0o123456)
             })
@@ -467,8 +483,8 @@ mod tests {
     #[test]
     fn add_ext_relative() {
         assert_eq!(
-            Instruction::decode(0o006124, || Ok(0o076543)),
-            Ok(Instruction::BasicOperation {
+            Instruction::decode(0o006124, || Ok::<_, InstructionDecodeError>(0o076543)),
+            Ok::<_, InstructionDecodeError>(Instruction::BasicOperation {
                 operation: BasicOperation::Add,
                 operand: Operand::Relative(0o076543)
             })
@@ -478,8 +494,8 @@ mod tests {
     #[test]
     fn sub_ext_index_x() {
         assert_eq!(
-            Instruction::decode(0o006145, || Ok(0o000000)),
-            Ok(Instruction::BasicOperation {
+            Instruction::decode(0o006145, || Ok::<_, InstructionDecodeError>(0o000000)),
+            Ok::<_, InstructionDecodeError>(Instruction::BasicOperation {
                 operation: BasicOperation::Sub,
                 operand: Operand::IndexX(0o000000)
             })
@@ -489,8 +505,8 @@ mod tests {
     #[test]
     fn mul_ext_index_b() {
         assert_eq!(
-            Instruction::decode(0o006166, || Ok(0o177777)),
-            Ok(Instruction::BasicOperation {
+            Instruction::decode(0o006166, || Ok::<_, InstructionDecodeError>(0o177777)),
+            Ok::<_, InstructionDecodeError>(Instruction::BasicOperation {
                 operation: BasicOperation::Mul,
                 operand: Operand::IndexB(0o177777)
             })
@@ -500,8 +516,8 @@ mod tests {
     #[test]
     fn div_ext_direct() {
         assert_eq!(
-            Instruction::decode(0o006177, || Ok(0o052525)),
-            Ok(Instruction::BasicOperation {
+            Instruction::decode(0o006177, || Ok::<_, InstructionDecodeError>(0o052525)),
+            Ok::<_, InstructionDecodeError>(Instruction::BasicOperation {
                 operation: BasicOperation::Div,
                 operand: Operand::Direct(0o052525)
             })
@@ -511,8 +527,8 @@ mod tests {
     #[test]
     fn ora_ext_indirect() {
         assert_eq!(
-            Instruction::decode(0o006117, || Ok(0o125252)),
-            Ok(Instruction::BasicOperation {
+            Instruction::decode(0o006117, || Ok::<_, InstructionDecodeError>(0o125252)),
+            Ok::<_, InstructionDecodeError>(Instruction::BasicOperation {
                 operation: BasicOperation::Ora,
                 operand: Operand::Indirect(0o25252)
             })
@@ -522,8 +538,8 @@ mod tests {
     #[test]
     fn era_ext_weird_immediate_1() {
         assert_eq!(
-            Instruction::decode(0o006131, || Ok(0o070707)),
-            Ok(Instruction::BasicOperation {
+            Instruction::decode(0o006131, || Ok::<_, InstructionDecodeError>(0o070707)),
+            Ok::<_, InstructionDecodeError>(Instruction::BasicOperation {
                 operation: BasicOperation::Era,
                 operand: Operand::Immediate(0o070707)
             })
@@ -533,8 +549,8 @@ mod tests {
     #[test]
     fn era_ext_weird_immediate_3() {
         assert_eq!(
-            Instruction::decode(0o006133, || Ok(0o101010)),
-            Ok(Instruction::BasicOperation {
+            Instruction::decode(0o006133, || Ok::<_, InstructionDecodeError>(0o101010)),
+            Ok::<_, InstructionDecodeError>(Instruction::BasicOperation {
                 operation: BasicOperation::Era,
                 operand: Operand::Immediate(0o101010)
             })
@@ -545,7 +561,7 @@ mod tests {
     fn invalid_immediate_00() {
         assert_eq!(
             Instruction::decode(0o006000, || panic!()),
-            Err(VarianError::InstructionDecodeError)
+            Err(InstructionDecodeError)
         );
     }
 
@@ -553,7 +569,7 @@ mod tests {
     fn invalid_ext_direct_10() {
         assert_eq!(
             Instruction::decode(0o006107, || panic!()),
-            Err(VarianError::InstructionDecodeError)
+            Err(InstructionDecodeError)
         );
     }
 
@@ -561,7 +577,7 @@ mod tests {
     fn hlt() {
         assert_eq!(
             Instruction::decode(0o000000, || panic!()),
-            Ok(Instruction::Hlt)
+            Ok::<_, InstructionDecodeError>(Instruction::Hlt)
         );
     }
 
@@ -569,7 +585,7 @@ mod tests {
     fn hlt_junk() {
         assert_eq!(
             Instruction::decode(0o000123, || panic!()),
-            Ok(Instruction::Hlt)
+            Ok::<_, InstructionDecodeError>(Instruction::Hlt)
         );
     }
 
@@ -577,7 +593,7 @@ mod tests {
     fn reg_nop() {
         assert_eq!(
             Instruction::decode(0o005000, || panic!()),
-            Ok(Instruction::RegisterChange {
+            Ok::<_, InstructionDecodeError>(Instruction::RegisterChange {
                 conditional: false,
                 mode: RegisterChangeMode::Transfer,
                 source: RegisterChangeRegister::empty(),
@@ -590,7 +606,7 @@ mod tests {
     fn sof() {
         assert_eq!(
             Instruction::decode(0o007401, || panic!()),
-            Ok(Instruction::Overflow(OverflowMode::Set))
+            Ok::<_, InstructionDecodeError>(Instruction::Overflow(OverflowMode::Set))
         );
     }
 
@@ -598,7 +614,7 @@ mod tests {
     fn rof() {
         assert_eq!(
             Instruction::decode(0o007400, || panic!()),
-            Ok(Instruction::Overflow(OverflowMode::Reset))
+            Ok::<_, InstructionDecodeError>(Instruction::Overflow(OverflowMode::Reset))
         );
     }
 
@@ -606,7 +622,7 @@ mod tests {
     fn shift_lsra() {
         assert_eq!(
             Instruction::decode(0o004340, || panic!()),
-            Ok(Instruction::Shift {
+            Ok::<_, InstructionDecodeError>(Instruction::Shift {
                 registers: ShiftRegisters::A,
                 mode: ShiftMode::LogicalShiftRight,
                 count: 0
@@ -618,7 +634,7 @@ mod tests {
     fn shift_lsrb() {
         assert_eq!(
             Instruction::decode(0o004177, || panic!()),
-            Ok(Instruction::Shift {
+            Ok::<_, InstructionDecodeError>(Instruction::Shift {
                 registers: ShiftRegisters::B,
                 mode: ShiftMode::LogicalShiftRight,
                 count: 0o37
@@ -630,7 +646,7 @@ mod tests {
     fn shift_lrla() {
         assert_eq!(
             Instruction::decode(0o004247, || panic!()),
-            Ok(Instruction::Shift {
+            Ok::<_, InstructionDecodeError>(Instruction::Shift {
                 registers: ShiftRegisters::A,
                 mode: ShiftMode::LogicalRotateLeft,
                 count: 0o7
@@ -642,7 +658,7 @@ mod tests {
     fn shift_lrlb() {
         assert_eq!(
             Instruction::decode(0o004070, || panic!()),
-            Ok(Instruction::Shift {
+            Ok::<_, InstructionDecodeError>(Instruction::Shift {
                 registers: ShiftRegisters::B,
                 mode: ShiftMode::LogicalRotateLeft,
                 count: 0o30
@@ -654,7 +670,7 @@ mod tests {
     fn shift_llsr() {
         assert_eq!(
             Instruction::decode(0o004555, || panic!()),
-            Ok(Instruction::Shift {
+            Ok::<_, InstructionDecodeError>(Instruction::Shift {
                 registers: ShiftRegisters::Long,
                 mode: ShiftMode::LogicalShiftRight,
                 count: 0o15
@@ -666,7 +682,7 @@ mod tests {
     fn shift_llrl() {
         assert_eq!(
             Instruction::decode(0o004467, || panic!()),
-            Ok(Instruction::Shift {
+            Ok::<_, InstructionDecodeError>(Instruction::Shift {
                 registers: ShiftRegisters::Long,
                 mode: ShiftMode::LogicalRotateLeft,
                 count: 0o27
@@ -678,7 +694,7 @@ mod tests {
     fn shift_asra() {
         assert_eq!(
             Instruction::decode(0o004337, || panic!()),
-            Ok(Instruction::Shift {
+            Ok::<_, InstructionDecodeError>(Instruction::Shift {
                 registers: ShiftRegisters::A,
                 mode: ShiftMode::ArithmeticShiftRight,
                 count: 0o37
@@ -690,7 +706,7 @@ mod tests {
     fn shift_asla() {
         assert_eq!(
             Instruction::decode(0o004216, || panic!()),
-            Ok(Instruction::Shift {
+            Ok::<_, InstructionDecodeError>(Instruction::Shift {
                 registers: ShiftRegisters::A,
                 mode: ShiftMode::ArithmeticShiftLeft,
                 count: 0o16
@@ -702,7 +718,7 @@ mod tests {
     fn shift_asrb() {
         assert_eq!(
             Instruction::decode(0o004101, || panic!()),
-            Ok(Instruction::Shift {
+            Ok::<_, InstructionDecodeError>(Instruction::Shift {
                 registers: ShiftRegisters::B,
                 mode: ShiftMode::ArithmeticShiftRight,
                 count: 0o01
@@ -714,7 +730,7 @@ mod tests {
     fn shift_aslb() {
         assert_eq!(
             Instruction::decode(0o004007, || panic!()),
-            Ok(Instruction::Shift {
+            Ok::<_, InstructionDecodeError>(Instruction::Shift {
                 registers: ShiftRegisters::B,
                 mode: ShiftMode::ArithmeticShiftLeft,
                 count: 0o07
@@ -726,7 +742,7 @@ mod tests {
     fn shift_lasr() {
         assert_eq!(
             Instruction::decode(0o004510, || panic!()),
-            Ok(Instruction::Shift {
+            Ok::<_, InstructionDecodeError>(Instruction::Shift {
                 registers: ShiftRegisters::Long,
                 mode: ShiftMode::ArithmeticShiftRight,
                 count: 0o10
@@ -738,7 +754,7 @@ mod tests {
     fn shift_lasl() {
         assert_eq!(
             Instruction::decode(0o004420, || panic!()),
-            Ok(Instruction::Shift {
+            Ok::<_, InstructionDecodeError>(Instruction::Shift {
                 registers: ShiftRegisters::Long,
                 mode: ShiftMode::ArithmeticShiftLeft,
                 count: 0o20
@@ -750,7 +766,7 @@ mod tests {
     fn reg_iar() {
         assert_eq!(
             Instruction::decode(0o005111, || panic!()),
-            Ok(Instruction::RegisterChange {
+            Ok::<_, InstructionDecodeError>(Instruction::RegisterChange {
                 conditional: false,
                 mode: RegisterChangeMode::Increment,
                 source: RegisterChangeRegister::A,
@@ -763,7 +779,7 @@ mod tests {
     fn reg_ibr() {
         assert_eq!(
             Instruction::decode(0o005122, || panic!()),
-            Ok(Instruction::RegisterChange {
+            Ok::<_, InstructionDecodeError>(Instruction::RegisterChange {
                 conditional: false,
                 mode: RegisterChangeMode::Increment,
                 source: RegisterChangeRegister::B,
@@ -776,7 +792,7 @@ mod tests {
     fn reg_ixr() {
         assert_eq!(
             Instruction::decode(0o005144, || panic!()),
-            Ok(Instruction::RegisterChange {
+            Ok::<_, InstructionDecodeError>(Instruction::RegisterChange {
                 conditional: false,
                 mode: RegisterChangeMode::Increment,
                 source: RegisterChangeRegister::X,
@@ -789,7 +805,7 @@ mod tests {
     fn reg_dar() {
         assert_eq!(
             Instruction::decode(0o005311, || panic!()),
-            Ok(Instruction::RegisterChange {
+            Ok::<_, InstructionDecodeError>(Instruction::RegisterChange {
                 conditional: false,
                 mode: RegisterChangeMode::Decrement,
                 source: RegisterChangeRegister::A,
@@ -802,7 +818,7 @@ mod tests {
     fn reg_dbr() {
         assert_eq!(
             Instruction::decode(0o005322, || panic!()),
-            Ok(Instruction::RegisterChange {
+            Ok::<_, InstructionDecodeError>(Instruction::RegisterChange {
                 conditional: false,
                 mode: RegisterChangeMode::Decrement,
                 source: RegisterChangeRegister::B,
@@ -815,7 +831,7 @@ mod tests {
     fn reg_dxr() {
         assert_eq!(
             Instruction::decode(0o005344, || panic!()),
-            Ok(Instruction::RegisterChange {
+            Ok::<_, InstructionDecodeError>(Instruction::RegisterChange {
                 conditional: false,
                 mode: RegisterChangeMode::Decrement,
                 source: RegisterChangeRegister::X,
@@ -828,7 +844,7 @@ mod tests {
     fn reg_cpa() {
         assert_eq!(
             Instruction::decode(0o005211, || panic!()),
-            Ok(Instruction::RegisterChange {
+            Ok::<_, InstructionDecodeError>(Instruction::RegisterChange {
                 conditional: false,
                 mode: RegisterChangeMode::Complement,
                 source: RegisterChangeRegister::A,
@@ -841,7 +857,7 @@ mod tests {
     fn reg_cpb() {
         assert_eq!(
             Instruction::decode(0o005222, || panic!()),
-            Ok(Instruction::RegisterChange {
+            Ok::<_, InstructionDecodeError>(Instruction::RegisterChange {
                 conditional: false,
                 mode: RegisterChangeMode::Complement,
                 source: RegisterChangeRegister::B,
@@ -854,7 +870,7 @@ mod tests {
     fn reg_cpx() {
         assert_eq!(
             Instruction::decode(0o005244, || panic!()),
-            Ok(Instruction::RegisterChange {
+            Ok::<_, InstructionDecodeError>(Instruction::RegisterChange {
                 conditional: false,
                 mode: RegisterChangeMode::Complement,
                 source: RegisterChangeRegister::X,
@@ -867,7 +883,7 @@ mod tests {
     fn reg_tab() {
         assert_eq!(
             Instruction::decode(0o005012, || panic!()),
-            Ok(Instruction::RegisterChange {
+            Ok::<_, InstructionDecodeError>(Instruction::RegisterChange {
                 conditional: false,
                 mode: RegisterChangeMode::Transfer,
                 source: RegisterChangeRegister::A,
@@ -880,7 +896,7 @@ mod tests {
     fn reg_tax() {
         assert_eq!(
             Instruction::decode(0o005014, || panic!()),
-            Ok(Instruction::RegisterChange {
+            Ok::<_, InstructionDecodeError>(Instruction::RegisterChange {
                 conditional: false,
                 mode: RegisterChangeMode::Transfer,
                 source: RegisterChangeRegister::A,
@@ -893,7 +909,7 @@ mod tests {
     fn reg_tba() {
         assert_eq!(
             Instruction::decode(0o005021, || panic!()),
-            Ok(Instruction::RegisterChange {
+            Ok::<_, InstructionDecodeError>(Instruction::RegisterChange {
                 conditional: false,
                 mode: RegisterChangeMode::Transfer,
                 source: RegisterChangeRegister::B,
@@ -906,7 +922,7 @@ mod tests {
     fn reg_tbx() {
         assert_eq!(
             Instruction::decode(0o005024, || panic!()),
-            Ok(Instruction::RegisterChange {
+            Ok::<_, InstructionDecodeError>(Instruction::RegisterChange {
                 conditional: false,
                 mode: RegisterChangeMode::Transfer,
                 source: RegisterChangeRegister::B,
@@ -919,7 +935,7 @@ mod tests {
     fn reg_txa() {
         assert_eq!(
             Instruction::decode(0o005041, || panic!()),
-            Ok(Instruction::RegisterChange {
+            Ok::<_, InstructionDecodeError>(Instruction::RegisterChange {
                 conditional: false,
                 mode: RegisterChangeMode::Transfer,
                 source: RegisterChangeRegister::X,
@@ -932,7 +948,7 @@ mod tests {
     fn reg_txb() {
         assert_eq!(
             Instruction::decode(0o005042, || panic!()),
-            Ok(Instruction::RegisterChange {
+            Ok::<_, InstructionDecodeError>(Instruction::RegisterChange {
                 conditional: false,
                 mode: RegisterChangeMode::Transfer,
                 source: RegisterChangeRegister::X,
@@ -945,7 +961,7 @@ mod tests {
     fn reg_tza() {
         assert_eq!(
             Instruction::decode(0o005001, || panic!()),
-            Ok(Instruction::RegisterChange {
+            Ok::<_, InstructionDecodeError>(Instruction::RegisterChange {
                 conditional: false,
                 mode: RegisterChangeMode::Transfer,
                 source: RegisterChangeRegister::empty(),
@@ -958,7 +974,7 @@ mod tests {
     fn reg_tzb() {
         assert_eq!(
             Instruction::decode(0o005002, || panic!()),
-            Ok(Instruction::RegisterChange {
+            Ok::<_, InstructionDecodeError>(Instruction::RegisterChange {
                 conditional: false,
                 mode: RegisterChangeMode::Transfer,
                 source: RegisterChangeRegister::empty(),
@@ -971,7 +987,7 @@ mod tests {
     fn reg_tzx() {
         assert_eq!(
             Instruction::decode(0o005004, || panic!()),
-            Ok(Instruction::RegisterChange {
+            Ok::<_, InstructionDecodeError>(Instruction::RegisterChange {
                 conditional: false,
                 mode: RegisterChangeMode::Transfer,
                 source: RegisterChangeRegister::empty(),
@@ -984,7 +1000,7 @@ mod tests {
     fn reg_aofa() {
         assert_eq!(
             Instruction::decode(0o005511, || panic!()),
-            Ok(Instruction::RegisterChange {
+            Ok::<_, InstructionDecodeError>(Instruction::RegisterChange {
                 conditional: true,
                 mode: RegisterChangeMode::Increment,
                 source: RegisterChangeRegister::A,
@@ -997,7 +1013,7 @@ mod tests {
     fn reg_aofb() {
         assert_eq!(
             Instruction::decode(0o005522, || panic!()),
-            Ok(Instruction::RegisterChange {
+            Ok::<_, InstructionDecodeError>(Instruction::RegisterChange {
                 conditional: true,
                 mode: RegisterChangeMode::Increment,
                 source: RegisterChangeRegister::B,
@@ -1010,7 +1026,7 @@ mod tests {
     fn reg_aofx() {
         assert_eq!(
             Instruction::decode(0o005544, || panic!()),
-            Ok(Instruction::RegisterChange {
+            Ok::<_, InstructionDecodeError>(Instruction::RegisterChange {
                 conditional: true,
                 mode: RegisterChangeMode::Increment,
                 source: RegisterChangeRegister::X,
@@ -1023,7 +1039,7 @@ mod tests {
     fn reg_sofa() {
         assert_eq!(
             Instruction::decode(0o005711, || panic!()),
-            Ok(Instruction::RegisterChange {
+            Ok::<_, InstructionDecodeError>(Instruction::RegisterChange {
                 conditional: true,
                 mode: RegisterChangeMode::Decrement,
                 source: RegisterChangeRegister::A,
@@ -1036,7 +1052,7 @@ mod tests {
     fn reg_sofb() {
         assert_eq!(
             Instruction::decode(0o005722, || panic!()),
-            Ok(Instruction::RegisterChange {
+            Ok::<_, InstructionDecodeError>(Instruction::RegisterChange {
                 conditional: true,
                 mode: RegisterChangeMode::Decrement,
                 source: RegisterChangeRegister::B,
@@ -1049,7 +1065,7 @@ mod tests {
     fn reg_sofx() {
         assert_eq!(
             Instruction::decode(0o005744, || panic!()),
-            Ok(Instruction::RegisterChange {
+            Ok::<_, InstructionDecodeError>(Instruction::RegisterChange {
                 conditional: true,
                 mode: RegisterChangeMode::Decrement,
                 source: RegisterChangeRegister::X,
@@ -1061,8 +1077,8 @@ mod tests {
     #[test]
     fn jmp_jmp() {
         assert_eq!(
-            Instruction::decode(0o001000, || Ok(0o000000)),
-            Ok(Instruction::Jump {
+            Instruction::decode(0o001000, || Ok::<_, InstructionDecodeError>(0o000000)),
+            Ok::<_, InstructionDecodeError>(Instruction::Jump {
                 mode: JumpMode::Jump,
                 conditions: JumpConditions::empty(),
                 address: 0o000000,
@@ -1073,8 +1089,8 @@ mod tests {
     #[test]
     fn jmp_jofm() {
         assert_eq!(
-            Instruction::decode(0o002001, || Ok(0o077777)),
-            Ok(Instruction::Jump {
+            Instruction::decode(0o002001, || Ok::<_, InstructionDecodeError>(0o077777)),
+            Ok::<_, InstructionDecodeError>(Instruction::Jump {
                 mode: JumpMode::Mark,
                 conditions: JumpConditions::OVERFLOW,
                 address: 0o077777,
@@ -1085,8 +1101,8 @@ mod tests {
     #[test]
     fn jmp_xap() {
         assert_eq!(
-            Instruction::decode(0o003002, || Ok(0o010101)),
-            Ok(Instruction::Jump {
+            Instruction::decode(0o003002, || Ok::<_, InstructionDecodeError>(0o010101)),
+            Ok::<_, InstructionDecodeError>(Instruction::Jump {
                 mode: JumpMode::Execute,
                 conditions: JumpConditions::A_GE_ZERO,
                 address: 0o010101,
@@ -1097,8 +1113,8 @@ mod tests {
     #[test]
     fn jmp_jan_indirect() {
         assert_eq!(
-            Instruction::decode(0o001004, || Ok(0o101010)),
-            Ok(Instruction::Jump {
+            Instruction::decode(0o001004, || Ok::<_, InstructionDecodeError>(0o101010)),
+            Ok::<_, InstructionDecodeError>(Instruction::Jump {
                 mode: JumpMode::Jump,
                 conditions: JumpConditions::A_LT_ZERO,
                 address: 0o101010,
@@ -1109,8 +1125,8 @@ mod tests {
     #[test]
     fn jmp_jazm_indirect() {
         assert_eq!(
-            Instruction::decode(0o002010, || Ok(0o170707)),
-            Ok(Instruction::Jump {
+            Instruction::decode(0o002010, || Ok::<_, InstructionDecodeError>(0o170707)),
+            Ok::<_, InstructionDecodeError>(Instruction::Jump {
                 mode: JumpMode::Mark,
                 conditions: JumpConditions::A_EQ_ZERO,
                 address: 0o170707,
@@ -1121,8 +1137,8 @@ mod tests {
     #[test]
     fn jmp_xbz_indirect() {
         assert_eq!(
-            Instruction::decode(0o003020, || Ok(0o100000)),
-            Ok(Instruction::Jump {
+            Instruction::decode(0o003020, || Ok::<_, InstructionDecodeError>(0o100000)),
+            Ok::<_, InstructionDecodeError>(Instruction::Jump {
                 mode: JumpMode::Execute,
                 conditions: JumpConditions::B_EQ_ZERO,
                 address: 0o100000,
@@ -1133,8 +1149,8 @@ mod tests {
     #[test]
     fn jmp_jxz_indirect() {
         assert_eq!(
-            Instruction::decode(0o001040, || Ok(0o177777)),
-            Ok(Instruction::Jump {
+            Instruction::decode(0o001040, || Ok::<_, InstructionDecodeError>(0o177777)),
+            Ok::<_, InstructionDecodeError>(Instruction::Jump {
                 mode: JumpMode::Jump,
                 conditions: JumpConditions::X_EQ_ZERO,
                 address: 0o177777,
@@ -1145,8 +1161,8 @@ mod tests {
     #[test]
     fn jmp_js1() {
         assert_eq!(
-            Instruction::decode(0o001100, || Ok(0o000000)),
-            Ok(Instruction::Jump {
+            Instruction::decode(0o001100, || Ok::<_, InstructionDecodeError>(0o000000)),
+            Ok::<_, InstructionDecodeError>(Instruction::Jump {
                 mode: JumpMode::Jump,
                 conditions: JumpConditions::SS1_SET,
                 address: 0o000000,
@@ -1157,8 +1173,8 @@ mod tests {
     #[test]
     fn jmp_js2m() {
         assert_eq!(
-            Instruction::decode(0o002200, || Ok(0o000001)),
-            Ok(Instruction::Jump {
+            Instruction::decode(0o002200, || Ok::<_, InstructionDecodeError>(0o000001)),
+            Ok::<_, InstructionDecodeError>(Instruction::Jump {
                 mode: JumpMode::Mark,
                 conditions: JumpConditions::SS2_SET,
                 address: 0o000001,
@@ -1169,8 +1185,8 @@ mod tests {
     #[test]
     fn jmp_xs3() {
         assert_eq!(
-            Instruction::decode(0o003400, || Ok(0o000002)),
-            Ok(Instruction::Jump {
+            Instruction::decode(0o003400, || Ok::<_, InstructionDecodeError>(0o000002)),
+            Ok::<_, InstructionDecodeError>(Instruction::Jump {
                 mode: JumpMode::Execute,
                 conditions: JumpConditions::SS3_SET,
                 address: 0o000002,
@@ -1182,7 +1198,7 @@ mod tests {
     fn io_exc_rtc_enable() {
         assert_eq!(
             Instruction::decode(0o100147, || panic!()),
-            Ok(Instruction::InputOutput {
+            Ok::<_, InstructionDecodeError>(Instruction::InputOutput {
                 operation: IoOperation::Exc { x: 0o1 },
                 device: 0o47
             })
@@ -1192,8 +1208,8 @@ mod tests {
     #[test]
     fn io_sen_card_char_ready() {
         assert_eq!(
-            Instruction::decode(0o101130, || Ok(0o100000)),
-            Ok(Instruction::InputOutput {
+            Instruction::decode(0o101130, || Ok::<_, InstructionDecodeError>(0o100000)),
+            Ok::<_, InstructionDecodeError>(Instruction::InputOutput {
                 operation: IoOperation::Sen {
                     x: 0o1,
                     address: 0o100000
@@ -1206,8 +1222,8 @@ mod tests {
     #[test]
     fn io_ime_tty_read_reg_to_mem() {
         assert_eq!(
-            Instruction::decode(0o102001, || Ok(0o077777)),
-            Ok(Instruction::InputOutput {
+            Instruction::decode(0o102001, || Ok::<_, InstructionDecodeError>(0o077777)),
+            Ok::<_, InstructionDecodeError>(Instruction::InputOutput {
                 operation: IoOperation::Ime { address: 0o077777 },
                 device: 0o01
             })
@@ -1218,7 +1234,7 @@ mod tests {
     fn io_ina_buf_init_reg_to_a() {
         assert_eq!(
             Instruction::decode(0o102120, || panic!()),
-            Ok(Instruction::InputOutput {
+            Ok::<_, InstructionDecodeError>(Instruction::InputOutput {
                 operation: IoOperation::Ina,
                 device: 0o20
             })
@@ -1229,7 +1245,7 @@ mod tests {
     fn io_inb_tape_buf_to_b() {
         assert_eq!(
             Instruction::decode(0o102210, || panic!()),
-            Ok(Instruction::InputOutput {
+            Ok::<_, InstructionDecodeError>(Instruction::InputOutput {
                 operation: IoOperation::Inb,
                 device: 0o10
             })
@@ -1240,7 +1256,7 @@ mod tests {
     fn io_inab_coupler_buf_to_ab() {
         assert_eq!(
             Instruction::decode(0o102371, || panic!()),
-            Ok(Instruction::InputOutput {
+            Ok::<_, InstructionDecodeError>(Instruction::InputOutput {
                 operation: IoOperation::Inab,
                 device: 0o71
             })
@@ -1251,7 +1267,7 @@ mod tests {
     fn io_cia_tapectl_buf_to_a_clr() {
         assert_eq!(
             Instruction::decode(0o102510, || panic!()),
-            Ok(Instruction::InputOutput {
+            Ok::<_, InstructionDecodeError>(Instruction::InputOutput {
                 operation: IoOperation::Cia,
                 device: 0o10
             })
@@ -1262,7 +1278,7 @@ mod tests {
     fn io_cib_discctl_in_to_b_clr() {
         assert_eq!(
             Instruction::decode(0o102614, || panic!()),
-            Ok(Instruction::InputOutput {
+            Ok::<_, InstructionDecodeError>(Instruction::InputOutput {
                 operation: IoOperation::Cib,
                 device: 0o14
             })
@@ -1273,7 +1289,7 @@ mod tests {
     fn io_ciab_paper_buf_to_ab_clr() {
         assert_eq!(
             Instruction::decode(0o102737, || panic!()),
-            Ok(Instruction::InputOutput {
+            Ok::<_, InstructionDecodeError>(Instruction::InputOutput {
                 operation: IoOperation::Ciab,
                 device: 0o37
             })
@@ -1283,8 +1299,8 @@ mod tests {
     #[test]
     fn io_ome_plotter_buf_from_mem() {
         assert_eq!(
-            Instruction::decode(0o103032, || Ok(0o000001)),
-            Ok(Instruction::InputOutput {
+            Instruction::decode(0o103032, || Ok::<_, InstructionDecodeError>(0o000001)),
+            Ok::<_, InstructionDecodeError>(Instruction::InputOutput {
                 operation: IoOperation::Ome { address: 0o000001 },
                 device: 0o32
             })
@@ -1294,8 +1310,8 @@ mod tests {
     #[test]
     fn io_oar_interrupt_mask_from_a() {
         assert_eq!(
-            Instruction::decode(0o103140, || Ok(0o000001)),
-            Ok(Instruction::InputOutput {
+            Instruction::decode(0o103140, || Ok::<_, InstructionDecodeError>(0o000001)),
+            Ok::<_, InstructionDecodeError>(Instruction::InputOutput {
                 operation: IoOperation::Oar,
                 device: 0o40
             })
@@ -1305,8 +1321,8 @@ mod tests {
     #[test]
     fn io_obr_bufio_buf_from_b() {
         assert_eq!(
-            Instruction::decode(0o103267, || Ok(0o000001)),
-            Ok(Instruction::InputOutput {
+            Instruction::decode(0o103267, || Ok::<_, InstructionDecodeError>(0o000001)),
+            Ok::<_, InstructionDecodeError>(Instruction::InputOutput {
                 operation: IoOperation::Obr,
                 device: 0o67
             })
@@ -1316,8 +1332,8 @@ mod tests {
     #[test]
     fn io_oab_relay_contacts_from_ab() {
         assert_eq!(
-            Instruction::decode(0o103377, || Ok(0o000001)),
-            Ok(Instruction::InputOutput {
+            Instruction::decode(0o103377, || Ok::<_, InstructionDecodeError>(0o000001)),
+            Ok::<_, InstructionDecodeError>(Instruction::InputOutput {
                 operation: IoOperation::Oab,
                 device: 0o77
             })

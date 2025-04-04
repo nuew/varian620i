@@ -1,5 +1,7 @@
 use std::{error::Error, fmt::Display};
 
+use crate::instruction::InstructionDecodeError;
+
 #[derive(Debug, PartialEq, Eq, Clone, Copy, Hash)]
 pub enum VarianError {
     InstructionDecodeError,
@@ -19,5 +21,11 @@ impl Error for VarianError {
             Self::InstructionDecodeError => "instruction decode",
             Self::InvalidAddressError => "invalid address",
         }
+    }
+}
+
+impl From<InstructionDecodeError> for VarianError {
+    fn from(value: InstructionDecodeError) -> Self {
+        VarianError::InstructionDecodeError
     }
 }
