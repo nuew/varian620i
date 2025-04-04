@@ -143,7 +143,7 @@ impl<W: Debug> Debug for Varian620i<W> {
     }
 }
 
-impl<W: Word> Varian620i<W> {
+impl<W: Word + Debug> Varian620i<W> {
     /// Number of words per memory bank.
     const WORDS_PER_BANK: usize = 4096;
 
@@ -251,31 +251,31 @@ impl<W: Word> Varian620i<W> {
             } => {
                 let mut ok = true;
                 if conditions.contains(JumpConditions::OVERFLOW) {
-                    ok |= self.control.contains(Control::OVERFLOW);
+                    ok &= self.control.contains(Control::OVERFLOW);
                 }
                 if conditions.contains(JumpConditions::A_GE_ZERO) {
-                    ok |= self.cpu.a >= 0.into();
+                    ok &= self.cpu.a >= 0.into();
                 }
                 if conditions.contains(JumpConditions::A_LT_ZERO) {
-                    ok |= self.cpu.a < 0.into();
+                    ok &= self.cpu.a < 0.into();
                 }
                 if conditions.contains(JumpConditions::A_EQ_ZERO) {
-                    ok |= self.cpu.a == 0.into();
+                    ok &= self.cpu.a == 0.into();
                 }
                 if conditions.contains(JumpConditions::B_EQ_ZERO) {
-                    ok |= self.cpu.b == 0.into();
+                    ok &= self.cpu.b == 0.into();
                 }
                 if conditions.contains(JumpConditions::X_EQ_ZERO) {
-                    ok |= self.cpu.x == 0.into();
+                    ok &= self.cpu.x == 0.into();
                 }
                 if conditions.contains(JumpConditions::SS1_SET) {
-                    ok |= self.control.contains(Control::SENSE_1);
+                    ok &= self.control.contains(Control::SENSE_1);
                 }
                 if conditions.contains(JumpConditions::SS2_SET) {
-                    ok |= self.control.contains(Control::SENSE_2);
+                    ok &= self.control.contains(Control::SENSE_2);
                 }
                 if conditions.contains(JumpConditions::SS3_SET) {
-                    ok |= self.control.contains(Control::SENSE_3);
+                    ok &= self.control.contains(Control::SENSE_3);
                 }
                 if ok {
                     let address = self.indirect(address)?;

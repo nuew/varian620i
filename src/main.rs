@@ -5,21 +5,7 @@ use std::{
 };
 use varian620i::{instruction::Instruction, Varian620i, VarianError};
 
-fn main() -> Result<(), Box<dyn Error>> {
-    let Some(file) = std::env::args_os().nth(1) else {
-        let exe = std::env::args().next();
-        eprintln!("Usage: {} <image.bin>", exe.unwrap_or("cargo run".into()));
-        return Ok(());
-    };
-
-    let mut file = BufReader::new(File::open(file)?);
-    let mut image = Vec::new();
-    file.read_to_end(&mut image)?;
-    let image: Box<_> = image
-        .chunks_exact(std::mem::size_of::<u16>())
-        .map(|chunk| u16::from_ne_bytes([chunk[0], chunk[1]]))
-        .collect();
-
+fn dump(image: &[u16]) {
     let mut index = 0;
     while index < image.len() {
         let mut doubleword = false;
@@ -45,7 +31,24 @@ fn main() -> Result<(), Box<dyn Error>> {
 
         index += if doubleword { 2 } else { 1 };
     }
+}
 
+fn main() -> Result<(), Box<dyn Error>> {
+    let Some(file) = std::env::args_os().nth(1) else {
+        let exe = std::env::args().next();
+        eprintln!("Usage: {} <image.bin>", exe.unwrap_or("cargo run".into()));
+        return Ok(());
+    };
+
+    let mut file = BufReader::new(File::open(file)?);
+    let mut image = Vec::new();
+    file.read_to_end(&mut image)?;
+    let image: Box<_> = image
+        .chunks_exact(std::mem::size_of::<u16>())
+        .map(|chunk| u16::from_ne_bytes([chunk[0], chunk[1]]))
+        .collect();
+
+    dump(&image);
     println!("\nRunning...\n");
 
     let mut emu = Varian620i::<u16>::from_image(image);
@@ -55,6 +58,8 @@ fn main() -> Result<(), Box<dyn Error>> {
         }
     }
     println!("{:?}", emu);
+
+    dump(emu.memory());
 
     Ok(())
 }

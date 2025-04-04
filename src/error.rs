@@ -25,7 +25,7 @@ impl Error for VarianError {
 }
 
 impl From<InstructionDecodeError> for VarianError {
-    fn from(value: InstructionDecodeError) -> Self {
+    fn from(_value: InstructionDecodeError) -> Self {
         VarianError::InstructionDecodeError
     }
 }
